@@ -19,8 +19,8 @@ import os
 import sys
 
 # Get credentials from environment variables
-ACCESS_ID = os.environ["TUYA_ACCESS_ID"]
-ACCESS_KEY = os.environ["TUYA_ACCESS_KEY"]
+ACCESS_ID = os.environ.get("TUYA_ACCESS_ID")
+ACCESS_KEY = os.environ.get("TUYA_ACCESS_KEY")
 ENDPOINT = "https://openapi.tuyaeu.com"
 
 # All three device IDs
@@ -164,7 +164,10 @@ def main():
 
     if not ACCESS_ID or not ACCESS_KEY:
         print("ERROR: TUYA_ACCESS_ID and TUYA_ACCESS_KEY must be set")
+        print(f"DEBUG: ACCESS_ID present: {bool(ACCESS_ID)}, ACCESS_KEY present: {bool(ACCESS_KEY)}")
         return 1
+    
+    print(f"DEBUG: Using ACCESS_ID: {ACCESS_ID[:8]}... (truncated for security)")
 
     api = SimpleTuyaAPI(ENDPOINT, ACCESS_ID, ACCESS_KEY)
 
@@ -172,7 +175,7 @@ def main():
         print(f"ERROR: Could not connect to Tuya API")
         return 2
 
-    print("✓ Connected successfully\n")
+    print("Connected successfully\n")
 
     all_readings = []
 
@@ -196,9 +199,9 @@ def main():
                 "humidity_percent": humidity
             }
             all_readings.append(reading)
-            print(f"✓ Temp: {temp}°C, Humidity: {humidity}%")
+            print(f"SUCCESS: Temp: {temp}C, Humidity: {humidity}%")
         else:
-            print(f"⚠ Could not extract temperature or humidity for {device_id}")
+            print(f"WARNING: Could not extract temperature or humidity for {device_id}")
 
         print()
 
