@@ -36,18 +36,17 @@ jobs:
 
       - name: Create manifest of available CSVs
         run: |
-          python - <<'PY'
-import json, os
-p = 'data'
-files = []
-if os.path.isdir(p):
-    files = sorted([f for f in os.listdir(p) if f.startswith('TROFICDORD') and f.endswith('.csv')])
-else:
-    os.makedirs(p, exist_ok=True)
-with open(os.path.join(p,'manifest.json'),'w') as fh:
-    json.dump(files, fh)
-print('Manifest written with', len(files), 'entries')
-PY
+          # ensure data dir exists
+          mkdir -p data
+
+          # build JSON array listing CSV filenames (base names)
+          files=$(ls data/TROFICDORD*.csv 2>/dev/null | xargs -n1 basename | awk 'BEGIN{first=1; printf "["} { if(!first) printf ","; printf "\"%s\"", $0; first=0 } END{ printf "]" }')
+          if [ -z "$files" ] || [ "$files" = "[]" ]; then
+            echo "[]" > data/manifest.json
+          else
+            echo "$files" > data/manifest.json
+          fi
+          echo "Manifest written: $(cat data/manifest.json)"
 
       - name: Publish to gh-pages branch
         env:
@@ -57,18 +56,20 @@ PY
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Prepare a temporary worktree to create/update gh-pages from current repo state
           BRANCH=gh-pages
+          WORKTREE=/tmp/gh-pages
 
           if git ls-remote --exit-code origin $BRANCH; then
             echo "$BRANCH exists, creating temporary worktree"
             git fetch origin $BRANCH
-            git worktree add /tmp/gh-pages origin/$BRANCH || true
+            rm -rf $WORKTREE
+            git worktree add $WORKTREE origin/$BRANCH || true
           else
-            echo "$BRANCH does not exist, create orphan branch in worktree"
-            mkdir -p /tmp/gh-pages
-            git worktree add /tmp/gh-pages --detach
-            pushd /tmp/gh-pages
+            echo "$BRANCH does not exist, creating orphan branch in worktree"
+            rm -rf $WORKTREE
+            mkdir -p $WORKTREE
+            git worktree add $WORKTREE --detach
+            pushd $WORKTREE
             git checkout --orphan $BRANCH || true
             git rm -rf . || true
             git commit --allow-empty -m "Initialize gh-pages" || true
@@ -77,12 +78,14 @@ PY
           fi
 
           # Copy generated data and web/index.html into the gh-pages worktree
-          rm -rf /tmp/gh-pages/*
-          cp -r data /tmp/gh-pages/ || true
-          mkdir -p /tmp/gh-pages
-          cp -r web/index.html /tmp/gh-pages/index.html || true
+          rm -rf $WORKTREE/*
+          cp -r data "$WORKTREE/" || true
+          cp -r web/index.html "$WORKTREE/index.html" || true
 
-          pushd /tmp/gh-pages
+          # Use token auth for pushing
+          git -C $WORKTREE remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
+
+          pushd $WORKTREE
           git add --all
           if git diff --staged --quiet; then
             echo "No changes to publish"
