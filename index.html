@@ -1,117 +1,122 @@
-name: TROFIC Cron Fetch
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>TROFIC Data Viewer</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    #controls { margin-bottom: 10px }
+  </style>
+</head>
+<body>
+  <h1>TROFIC Data Viewer</h1>
+  <div id="controls">
+    <label for="dateSelect">Select date:</label>
+    <select id="dateSelect"></select>
+    <button id="reload">Reload</button>
+    <a id="download" href="#" download>Download CSV</a>
+  </div>
+  <p id="msg">Loading manifest...</p>
+  <div id="tablewrap"></div>
 
-on:
-  schedule:
-    # every 30 minutes
-    - cron: "*/30 * * * *"
-  workflow_dispatch:
+<script>
+(async function(){
+  const msg = document.getElementById('msg');
+  function pad(n){return n<10? '0'+n : n;}
 
-permissions:
-  contents: write
+  async function loadManifest(){
+    try{
+      const r = await fetch('data/manifest.json');
+      if(!r.ok) throw new Error('Manifest not found');
+      const files = await r.json();
+      return files;
+    }catch(e){
+      console.error(e);
+      return [];
+    }
+  }
 
-jobs:
-  fetch:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository (full)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+  function filenameToDate(fn){
+    // expected TROFICDORDYYYYMMDD.csv
+    const m = fn.match(/TROFICDORD(\d{8})\.csv/);
+    return m ? m[1] : null;
+  }
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
+  function formatPretty(dateStr){
+    if(!dateStr) return dateStr;
+    return dateStr.slice(0,4)+'-'+dateStr.slice(4,6)+'-'+dateStr.slice(6,8);
+  }
 
-      - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install requests
+  function renderTable(text){
+    const lines = text.trim().split('\n');
+    if(lines.length === 0) return '<p>No data</p>';
+    const header = lines[0].split(',');
+    const rows = lines.slice(1).map(l => l.split(','));
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const trh = document.createElement('tr');
+    header.forEach(h => { const th = document.createElement('th'); th.textContent = h; trh.appendChild(th); });
+    thead.appendChild(trh);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      r.forEach(c => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    const wrap = document.getElementById('tablewrap');
+    wrap.innerHTML = '';
+    wrap.appendChild(table);
+  }
 
-      - name: Run fetch script (writes data/*.csv)
-        run: |
-          python scripts/fetch_tuya.py
-        env:
-          TUYA_ACCESS_ID: ${{ secrets.TUYA_ACCESS_ID }}
-          TUYA_ACCESS_KEY: ${{ secrets.TUYA_ACCESS_KEY }}
-          STORAGE_URL: ${{ secrets.STORAGE_URL }}
+  const files = await loadManifest();
+  const sel = document.getElementById('dateSelect');
+  sel.innerHTML = '';
+  if(files.length === 0){
+    msg.textContent = 'No data available';
+    return;
+  }
+  // build options from files, newest first
+  files.slice().reverse().forEach(fn => {
+    const d = filenameToDate(fn);
+    if(!d) return;
+    const opt = document.createElement('option');
+    opt.value = fn;
+    opt.textContent = formatPretty(d);
+    sel.appendChild(opt);
+  });
 
-      - name: Create manifest of available CSVs
-        run: |
-          # ensure data dir exists
-          mkdir -p data
+  function loadSelected(){
+    const fn = sel.value;
+    if(!fn) return;
+    const path = 'data/' + fn;
+    msg.textContent = 'Loading ' + fn + '...';
+    fetch(path).then(r => {
+      if(!r.ok) throw new Error('CSV not found');
+      return r.text();
+    }).then(text => {
+      msg.textContent = 'Showing: ' + fn;
+      renderTable(text);
+      const dl = document.getElementById('download');
+      dl.href = path;
+      dl.download = fn;
+    }).catch(e => {
+      msg.textContent = 'Could not load: ' + fn;
+      document.getElementById('tablewrap').innerHTML = '';
+    });
+  }
 
-          # build JSON array listing CSV filenames (base names)
-          files=$(ls data/TROFICDORD*.csv 2>/dev/null | xargs -n1 basename | awk 'BEGIN{first=1; printf "["} { if(!first) printf ","; printf "\"%s\"", $0; first=0 } END{ printf "]" }')
-          if [ -z "$files" ] || [ "$files" = "[]" ]; then
-            echo "[]" > data/manifest.json
-          else
-            echo "$files" > data/manifest.json
-          fi
-          echo "Manifest written: $(cat data/manifest.json)"
+  document.getElementById('reload').addEventListener('click', loadSelected);
+  sel.addEventListener('change', loadSelected);
 
-      - name: Publish to gh-pages branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          BRANCH=gh-pages
-          WORKTREE=/tmp/gh-pages
-
-          # Remove existing worktree if present
-          git worktree remove $WORKTREE 2>/dev/null || true
-          rm -rf $WORKTREE
-
-          if git ls-remote --exit-code origin $BRANCH; then
-            echo "$BRANCH exists, creating temporary worktree"
-            git fetch origin $BRANCH
-            git worktree add $WORKTREE origin/$BRANCH
-          else
-            echo "$BRANCH does not exist, creating orphan branch"
-            git worktree add --detach $WORKTREE
-            cd $WORKTREE
-            git checkout --orphan $BRANCH
-            git rm -rf . 2>/dev/null || true
-            git commit --allow-empty -m "Initialize gh-pages"
-            cd -
-          fi
-
-          # Clear gh-pages content
-          rm -rf $WORKTREE/*
-          rm -rf $WORKTREE/.??* 2>/dev/null || true
-
-          # Copy data directory
-          if [ -d "data" ]; then
-            cp -r data $WORKTREE/
-            echo "Copied data directory"
-          else
-            echo "WARNING: data directory not found"
-          fi
-
-          # Copy index.html - try multiple possible locations
-          if [ -f "web/index.html" ]; then
-            cp web/index.html $WORKTREE/index.html
-            echo "Copied web/index.html"
-          elif [ -f "index.html" ]; then
-            cp index.html $WORKTREE/index.html
-            echo "Copied index.html from root"
-          else
-            echo "ERROR: index.html not found in web/ or root"
-            exit 1
-          fi
-
-          # Commit and push
-          cd $WORKTREE
-          git add --all
-          
-          if git diff --staged --quiet; then
-            echo "No changes to publish"
-          else
-            git commit -m "Automated data update: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-            git push origin HEAD:$BRANCH
-            echo "Successfully pushed to gh-pages"
-          fi
-          
-          cd -
-          git worktree remove $WORKTREE
+  // default to first (newest)
+  sel.selectedIndex = 0;
+  loadSelected();
+})();
+</script>
+</body>
+</html>
