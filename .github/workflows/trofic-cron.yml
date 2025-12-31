@@ -59,38 +59,64 @@ jobs:
           BRANCH=gh-pages
           WORKTREE=/tmp/gh-pages
 
+          # Remove existing worktree if present
+          git worktree remove $WORKTREE 2>/dev/null || true
+          rm -rf $WORKTREE
+
           if git ls-remote --exit-code origin $BRANCH; then
             echo "$BRANCH exists, creating temporary worktree"
             git fetch origin $BRANCH
-            rm -rf $WORKTREE
-            git worktree add $WORKTREE origin/$BRANCH || true
+            git worktree add $WORKTREE origin/$BRANCH
           else
-            echo "$BRANCH does not exist, creating orphan branch in worktree"
-            rm -rf $WORKTREE
-            mkdir -p $WORKTREE
-            git worktree add $WORKTREE --detach
-            pushd $WORKTREE
-            git checkout --orphan $BRANCH || true
-            git rm -rf . || true
-            git commit --allow-empty -m "Initialize gh-pages" || true
-            git push origin $BRANCH || true
-            popd
+            echo "$BRANCH does not exist, creating orphan branch"
+            git worktree add --detach $WORKTREE
+            cd $WORKTREE
+            git checkout --orphan $BRANCH
+            git rm -rf . 2>/dev/null || true
+            git commit --allow-empty -m "Initialize gh-pages"
+            cd -
           fi
 
-          # Copy generated data and web/index.html into the gh-pages worktree
-          rm -rf $WORKTREE/*
-          cp -r data "$WORKTREE/" || true
-          cp -r web/index.html "$WORKTREE/index.html" || true
+          # Clear gh-pages content (but keep .git)
+          cd $WORKTREE
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          cd -
 
-          # Use token auth for pushing
-          git -C $WORKTREE remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
+          # Copy data directory
+          if [ -d "data" ]; then
+            cp -r data $WORKTREE/
+            echo "Copied data directory"
+            ls -la $WORKTREE/data/
+          else
+            echo "WARNING: data directory not found"
+          fi
 
-          pushd $WORKTREE
+          # Copy index.html - ONLY from web/ directory
+          if [ -f "web/index.html" ]; then
+            cp web/index.html $WORKTREE/index.html
+            echo "Copied web/index.html"
+            echo "Content preview:"
+            head -n 5 $WORKTREE/index.html
+          else
+            echo "ERROR: web/index.html not found"
+            echo "Current directory contents:"
+            ls -la
+            echo "web/ directory contents:"
+            ls -la web/ 2>/dev/null || echo "web/ directory does not exist"
+            exit 1
+          fi
+
+          # Commit and push
+          cd $WORKTREE
           git add --all
+          
           if git diff --staged --quiet; then
             echo "No changes to publish"
           else
             git commit -m "Automated data update: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
             git push origin HEAD:$BRANCH
+            echo "Successfully pushed to gh-pages"
           fi
-          popd
+          
+          cd -
+          git worktree remove $WORKTREE
