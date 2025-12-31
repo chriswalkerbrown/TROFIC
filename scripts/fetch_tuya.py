@@ -19,8 +19,10 @@ import os
 import sys
 
 # Get credentials from environment variables
-ACCESS_ID = os.environ.get("TUYA_ACCESS_ID")
-ACCESS_KEY = os.environ.get("TUYA_ACCESS_KEY")
+#ACCESS_ID = os.environ.get("TUYA_ACCESS_ID")
+#ACCESS_KEY = os.environ.get("TUYA_ACCESS_KEY")
+ACCESS_ID = "nrdk83fxp5jcm7fsuejx"
+ACCESS_KEY = "3138a9a59368473ab4d9d4dd047cabd6"
 ENDPOINT = "https://openapi.tuyaeu.com"
 
 # All three device IDs
