@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>TROFIC Data Viewer</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    #controls { margin-bottom: 10px }
+  </style>
+</head>
+<body>
+  <h1>TROFIC Data Viewer</h1>
+  <div id="controls">
+    <label for="dateSelect">Select date:</label>
+    <select id="dateSelect"></select>
+    <button id="reload">Reload</button>
+    <a id="download" href="#" download>Download CSV</a>
+  </div>
+  <p id="msg">Loading manifest...</p>
+  <div id="tablewrap"></div>
+
+<script>
+(async function(){
+  const msg = document.getElementById('msg');
+  function pad(n){return n<10? '0'+n : n;}
+
+  async function loadManifest(){
+    try{
+      const r = await fetch('data/manifest.json');
+      if(!r.ok) throw new Error('Manifest not found');
+      const files = await r.json();
+      return files;
+    }catch(e){
+      console.error(e);
+      return [];
+    }
+  }
+
+  function filenameToDate(fn){
+    // expected TROFICDORDYYYYMMDD.csv
+    const m = fn.match(/TROFICDORD(\d{8})\.csv/);
+    return m ? m[1] : null;
+  }
+
+  function formatPretty(dateStr){
+    if(!dateStr) return dateStr;
+    return dateStr.slice(0,4)+'-'+dateStr.slice(4,6)+'-'+dateStr.slice(6,8);
+  }
+
+  function renderTable(text){
+    const lines = text.trim().split('\n');
+    if(lines.length === 0) return '<p>No data</p>';
+    const header = lines[0].split(',');
+    const rows = lines.slice(1).map(l => l.split(','));
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const trh = document.createElement('tr');
+    header.forEach(h => { const th = document.createElement('th'); th.textContent = h; trh.appendChild(th); });
+    thead.appendChild(trh);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      r.forEach(c => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    const wrap = document.getElementById('tablewrap');
+    wrap.innerHTML = '';
+    wrap.appendChild(table);
+  }
+
+  const files = await loadManifest();
+  const sel = document.getElementById('dateSelect');
+  sel.innerHTML = '';
+  if(files.length === 0){
+    msg.textContent = 'No data available';
+    return;
+  }
+  // build options from files, newest first
+  files.slice().reverse().forEach(fn => {
+    const d = filenameToDate(fn);
+    if(!d) return;
+    const opt = document.createElement('option');
+    opt.value = fn;
+    opt.textContent = formatPretty(d);
+    sel.appendChild(opt);
+  });
+
+  function loadSelected(){
+    const fn = sel.value;
+    if(!fn) return;
+    const path = 'data/' + fn;
+    msg.textContent = 'Loading ' + fn + '...';
+    fetch(path).then(r => {
+      if(!r.ok) throw new Error('CSV not found');
+      return r.text();
+    }).then(text => {
+      msg.textContent = 'Showing: ' + fn;
+      renderTable(text);
+      const dl = document.getElementById('download');
+      dl.href = path;
+      dl.download = fn;
+    }).catch(e => {
+      msg.textContent = 'Could not load: ' + fn;
+      document.getElementById('tablewrap').innerHTML = '';
+    });
+  }
+
+  document.getElementById('reload').addEventListener('click', loadSelected);
+  sel.addEventListener('change', loadSelected);
+
+  // default to first (newest)
+  sel.selectedIndex = 0;
+  loadSelected();
+})();
+</script>
+</body>
+</html>
